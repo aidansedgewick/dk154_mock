@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
-
 import logging
 import time
-
+import traceback
 import socket
 
 import dk154_mock
@@ -18,43 +16,58 @@ def _DEFAULT_REPLY_CB(message):
 
 class MockTCPServer:
 
-    TIMEOUT = 20.0
+    # TIMEOUT = 20.0
 
-    def __init__(self, port=8888, reply_cb=_DEFAULT_REPLY_CB):
+    def __init__(
+        self, port=8888, reply_cb=_DEFAULT_REPLY_CB, timeout=180.0, server_name=None
+    ):
         self.PORT = port
         self.reply_cb = reply_cb
+
+        self.timeout = timeout
+
+        cb_name = reply_cb.__name__
+        self.server_name = server_name
+        logger.info(
+            f"init MockTCPServer {self.server_name} with:\n    port={port}, callback={cb_name}"
+        )
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        logger.info(f"exit MockTCPServer {self.server_name}")
         pass
 
     def start(self):
-        logger.info("start server")
+        logger.info(f"start server {self.server_name}")
         last_connection = time.time()
 
         while True:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(180.0)
+                sock.settimeout(self.timeout)
                 sock.bind(("127.0.0.1", self.PORT))
                 sock.listen(1)
                 conn, addr = sock.accept()
                 with conn:
                     logger.info(f"Connected to {addr}")
-                    last_message = time.time()
-                    print(last_message)
 
                     while True:
                         message = conn.recv(1024)
                         if not message:
-                            logger.info("Received empty message. Server end.")
+                            logger.info(
+                                f"({self.server_name}): received empty message. Server end."
+                            )
                             break
-                        logger.info(f"Recieved message from {addr}")
+                        msg = f"({self.server_name}): recieved message from {addr}"
+                        logger.info(msg)
 
                         try:
                             reply = self.reply_cb(message).encode("ascii")
                         except Exception as e:
+                            tr = traceback.format_exc()
+                            logger.info(f"last exception:\n\n{tr}")
+
                             logger.error(f"failed to respond to {message}. Send 'ERR'")
                             reply = "ERR".encode("ascii")
                         conn.sendall(reply)
@@ -63,5 +76,6 @@ class MockTCPServer:
 
 
 if __name__ == "__main__":
+
     with MockTCPServer() as server:
         server.start()

@@ -1,5 +1,6 @@
 import logging
 import sys
+from pathlib import Path
 
 stream_handler = logging.StreamHandler(sys.stdout)
 logging.basicConfig(
@@ -10,3 +11,5 @@ logging.basicConfig(
 )
 
 stream_handler = logging.StreamHandler(sys.stdout)
+
+base_path = Path(__file__).parent
