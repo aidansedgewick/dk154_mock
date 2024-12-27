@@ -19,6 +19,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", default=None, type=Path)
     parser.add_argument("-d", "--data-path", default=None, type=Path)
     parser.add_argument("-w", "--no-data", default=False, action="store_true")
+    parser.add_argument("-t", "--timeout", default=600.0, type=float)
 
     args = parser.parse_args()
 
@@ -33,12 +34,12 @@ if __name__ == "__main__":
         ccd3_kwargs = config.get("ccd3", {})
         dfosc_kwargs = config.get("dfosc", {})
 
-    mock_dk154 = MockDk154()  # Mock observatory that the servers inter
+    mock_dk154 = MockDk154()  # Mock observatory that servers interact with
 
-    ascol_server = MockAscolServer(obs=mock_dk154, **ascol_kwargs)
+    ascol_server = MockAscolServer(obs=mock_dk154, timeout=args.timeout, **ascol_kwargs)
     ascol_server_thread = threading.Thread(target=ascol_server.start, daemon=False)
 
-    dfosc_server = MockDfoscServer(obs=mock_dk154, **dfosc_kwargs)
+    dfosc_server = MockDfoscServer(obs=mock_dk154, timeout=args.timeout, **dfosc_kwargs)
     dfosc_server_thread = threading.Thread(target=dfosc_server.start, daemon=False)
 
     ccd3_server = get_mock_ccd3_server(mock_dk154)

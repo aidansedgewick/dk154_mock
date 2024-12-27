@@ -12,8 +12,13 @@ logger = getLogger("MockDfoscServer")
 
 
 class MockDfoscServer(MockTCPServer):
-    def __init__(self, obs: MockDk154, port: int = 8883):
-        super().__init__(port=port, reply_cb=self.dfosc_callback, server_name="dfosc")
+    def __init__(self, obs: MockDk154, port: int = 8885, timeout=600.0):
+        super().__init__(
+            port=port,
+            reply_cb=self.dfosc_callback,
+            timeout=timeout,
+            server_name="dfosc",
+        )
 
         self.obs = obs
         self.loaded_parameters = {}
@@ -24,7 +29,7 @@ class MockDfoscServer(MockTCPServer):
             command = command.decode("utf-8")
         command = command.rstrip()
 
-        logger.info(f"command is '{command}' = {command.split()}")
+        logger.debug(f"command is '{command}' = {command.split()}")
 
         # Get the correct responder. Think carefully, as commands have different lengths.
         if command.lower() in ["g", "a", "f", "gidfoc", "aidfoc", "fidfoc"]:
@@ -38,20 +43,20 @@ class MockDfoscServer(MockTCPServer):
 
         response_function = self.responders_lookup.get(responder_code, None)
         if response_function is not None:
-            logger.info(f"responding to {responder_code}...")
+            logger.debug(f"responding to {responder_code}...")
             try:
                 response = response_function(command)
                 response = response or ""  # Don't want 'None' as response...
                 if isinstance(response, tuple):
                     response = " ".join(str(x) for x in response)
-                logger.info(f"successful response {response}")
+                logger.debug(f"successful response {response}")
                 response = response + "\n"
             except Exception as e:
                 logger.error(f"exception {type(e)}: {e}")
                 tr = traceback.format_exc()
                 logger.error(f"traceback \n:{tr}")
                 return "ERR"
-            logger.info(f"return response {repr(response)}")
+            logger.debug(f"return response {repr(response)}")
             return response
         logger.error(f"\033[31;1mNo responder for {responder_code}.\033[0m Return ERR.")
         return "ERR"
@@ -92,7 +97,6 @@ class MockDfoscServer(MockTCPServer):
 
     def gg_response(self, command: str):
         pos = int(command[2:])
-        logger.info(f"DFOSC grism move to {pos}")
         self.obs.dfosc.grism_move_position(pos)
         return command
 
@@ -100,13 +104,12 @@ class MockDfoscServer(MockTCPServer):
         rel_pos = int(command[2:])
         curr_pos = self.obs.dfosc.get_grism_position()
         pos = curr_pos + rel_pos
-        logger.info(f"DFOSC grism move to {pos}")
         self.obs.dfosc.grism_move_position(pos)
         return command
 
     def gp_response(self, command: str):
         curr_pos = self.obs.dfosc.get_grism_position()
-        pos_str = f"{curr_pos:06d}"
+        pos_str = f"GP{curr_pos:06d}"
         return pos_str
 
     def gn_response(self, command: str):
@@ -119,9 +122,9 @@ class MockDfoscServer(MockTCPServer):
         raise NotImplementedError
 
     def g_response(self, command: str):
-        grism_ready = self.obs.dfosc.check_grism_ready()
+        grism_ready = self.obs.dfosc.get_grism_state()
         if grism_ready:
-            return "y"
+            return "gy"
         return "n"
 
     def gx_response(self, command: str):
@@ -136,7 +139,6 @@ class MockDfoscServer(MockTCPServer):
 
     def ag_response(self, command: str):
         pos = int(command[2:])
-        logger.info(f"DFOSC aperture move to {pos}")
         self.obs.dfosc.aperture_move_position(pos)
         return command
 
@@ -144,13 +146,12 @@ class MockDfoscServer(MockTCPServer):
         rel_pos = int(command[2:])
         curr_pos = self.obs.dfosc.get_aperture_position()
         pos = curr_pos + rel_pos
-        logger.info(f"DFOSC aperture move to {pos}")
         self.obs.dfosc.aperture_move_position(pos)
         return command
 
     def ap_response(self, command: str):
         curr_pos = self.obs.dfosc.get_aperture_position()
-        pos_str = f"{curr_pos:06d}"
+        pos_str = f"AP{curr_pos:06d}"
         return pos_str
 
     def an_response(self, command: str):
@@ -160,9 +161,9 @@ class MockDfoscServer(MockTCPServer):
         return command
 
     def a_response(self, command: str):
-        aperture_ready = self.obs.dfosc.check_aperture_ready()
+        aperture_ready = self.obs.dfosc.get_aperture_state()
         if aperture_ready:
-            return "y"
+            return "ay"
         return "n"
 
     def aq_response(self, command: str):
@@ -180,7 +181,6 @@ class MockDfoscServer(MockTCPServer):
 
     def fg_response(self, command: str):
         pos = int(command[2:])
-        logger.info(f"DFOSC aperture move to {pos}")
         self.obs.dfosc.filter_move_position(pos)
         return command
 
@@ -188,13 +188,12 @@ class MockDfoscServer(MockTCPServer):
         rel_pos = int(command[2:])
         curr_pos = self.obs.dfosc.get_filter_position()
         pos = curr_pos + rel_pos
-        logger.info(f"DFOSC filter move to {pos}")
         self.obs.dfosc.filter_move_position(pos)
         return command
 
     def fp_response(self, command: str):
         curr_pos = self.obs.dfosc.get_filter_position()
-        pos_str = f"{curr_pos:06d}"
+        pos_str = f"FP{curr_pos:06d}"
         return pos_str
 
     def fn_response(self, command: str):
@@ -204,9 +203,9 @@ class MockDfoscServer(MockTCPServer):
         return command
 
     def f_response(self, command: str):
-        filter_ready = self.obs.dfosc.check_filter_ready()
+        filter_ready = self.obs.dfosc.get_filter_state()
         if filter_ready:
-            return "y"
+            return "fy"
         return "n"
 
     def fq_response(self, command: str):

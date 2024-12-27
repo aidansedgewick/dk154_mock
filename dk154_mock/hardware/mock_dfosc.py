@@ -6,7 +6,7 @@ logger = getLogger("MockDfosc")
 
 class MockDfosc:
 
-    WHEEL_TIME = 5.0
+    WHEEL_TIME = 12.0
     QUIT_TIME = 1.0
     MAX_POSITION = 320000
     INTEGER_STEP = 40000
@@ -45,34 +45,13 @@ class MockDfosc:
         self._grism_ready = True
 
     def init_aperture(self):
-        self._grism_ready = True
+        self._aperture_ready = True
 
     def init_filter(self):
-        self._grism_ready = True
-
-    def check_grism_ready(self):
-        if not self._grism_ready:
-            return False
-        if time.time() - self._grism_move_start < self.WHEEL_TIME:
-            return False
-        return True
-
-    def check_aperture_ready(self):
-        if not self._aperture_ready:
-            return False
-        if time.time() - self._aperture_move_start < self.WHEEL_TIME:
-            return False
-        return True
-
-    def check_filter_ready(self):
-        if not self._filter_ready:
-            return False
-        if time.time() - self._filter_move_start < self.WHEEL_TIME:
-            return False
-        return True
+        self._filter_ready = True
 
     def grism_move_position(self, pos):
-        self._grism_move_start = time.time()
+        self._grism_move_start = time.perf_counter()
 
         if pos >= self.MAX_POSITION:
             msg = (
@@ -87,8 +66,19 @@ class MockDfosc:
     def get_grism_position(self):
         return self._grism_position
 
+    def set_grism_state(self):
+        if time.perf_counter() - self._grism_move_start < self.WHEEL_TIME:
+            self._grism_ready = False
+        else:
+            self._grism_ready = True
+        return
+
+    def get_grism_state(self):
+        self.set_grism_state()
+        return self._grism_ready
+
     def aperture_move_position(self, pos):
-        self._aperture_move_start = time.time()
+        self._aperture_move_start = time.perf_counter()
 
         if pos >= self.MAX_POSITION:
             msg = (
@@ -103,8 +93,19 @@ class MockDfosc:
     def get_aperture_position(self):
         return self._aperture_position
 
+    def set_apeture_state(self):
+        if time.perf_counter() - self._aperture_move_start < self.WHEEL_TIME:
+            self._aperture_ready = False
+        else:
+            self._aperture_ready = True
+        return
+
+    def get_aperture_state(self):
+        self.set_apeture_state()
+        return self._aperture_ready
+
     def filter_move_position(self, pos):
-        self._filter_move_start = time.time()
+        self._filter_move_start = time.perf_counter()
 
         if pos >= self.MAX_POSITION:
             msg = (
@@ -118,3 +119,14 @@ class MockDfosc:
 
     def get_filter_position(self):
         return self._filter_position
+
+    def set_filter_state(self):
+        if time.perf_counter() - self._filter_move_start < self.WHEEL_TIME:
+            self._filter_ready = False
+        else:
+            self._filter_ready = True
+        return
+
+    def get_filter_state(self):
+        self.set_filter_state()
+        return self._filter_ready

@@ -7,7 +7,7 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord, ICRS
 from astropy.io import fits
-from astropy.modeling.models import Gaussian2D, Moffat2D2D
+from astropy.modeling.models import Gaussian2D  # , Moffat2D
 from astropy.wcs import WCS
 
 try:
@@ -23,7 +23,7 @@ logger = getLogger("MockCCD3")
 
 noise_rng = np.random.default_rng(1234)
 
-CAMERA_READY = 0  # TODO: check this is true!
+CAMERA_READY = 4108  # TODO: check this is true!
 CAMERA_READING = 2
 CAMERA_HAS_IMAGE = 8
 DEVICE_ERROR_KILL = 65536
@@ -33,6 +33,7 @@ EXPECTED_PARAMETERS = (
     "async",
     "CCD3.exposure",
     "CCD3.IMAGETYP",
+    "CCD3.SHUTTER",
     "CCD3.OBJECT",
     "WASA.filter",
     "WASB.filter",
@@ -68,6 +69,7 @@ def gen_dark(
     base_current = current * exptime / gain
 
     dark_im = noise_rng.poisson(base_current, size=im.shape)
+    logger.info(f"gen dark noise shape={dark_im.shape}")
 
     if hot_pix > 0:
         pix_rng = np.random.default_rng(54321)
@@ -88,7 +90,9 @@ def gen_sky_noise(im: np.ndarray, sky_counts: float, gain: float, overscan: int 
     sky_rng = np.random.default_rng()
     sky_im = np.zeros(im.shape)
 
-    noise_shape = np.array([[im.shape[0], im.shape[1] - overscan]])
+    noise_shape = (im.shape[0], im.shape[1] - overscan)
+
+    logger.info(f"gen sky noise shape={noise_shape}")
     sky_noise = sky_rng.poisson(sky_counts * gain, size=noise_shape) / gain
 
     sky_im[:, :-overscan] = sky_noise
@@ -116,6 +120,7 @@ def gen_science(
     header: fits.Header,
     exptime: float,
     seeing: float = 10.0,  # * u.arcsec,
+    overscan: int = 0,
     gain: float = 1.0,
     healpix_level: int = 11,
 ):
@@ -137,8 +142,11 @@ def gen_science(
 
     x_impix, y_impix = star_coords.to_pixel(wcs)
 
-    ymask = (0 < y_impix) & (y_impix < im.shape[0])
-    xmask = (0 < x_impix) & (x_impix < im.shape[1])
+    y_max = im.shape[0]
+    x_max = im.shape[1] - overscan
+
+    ymask = (0 < y_impix) & (y_impix < y_max)
+    xmask = (0 < x_impix) & (x_impix < x_max - overscan)
 
     rel_hpix = near_hpix[xmask & ymask]
     rel_star_coords = star_coords[xmask & ymask]
@@ -169,15 +177,15 @@ def gen_science(
 
         obj_model.render(science_im)
 
-        ysl = slice(max(y_ii - size, 0), min(y_ii + size, im.shape[0] - 1))
-        xsl = slice(max(x_ii - size, 0), min(x_ii + size, im.shape[1] - 1))
+        ysl = slice(max(y_ii - size, 0), min(y_ii + size, y_max - 1))
+        xsl = slice(max(x_ii - size, 0), min(x_ii + size, x_max - 1))
 
     return science_im
 
 
 DEFAULT_CCD3_PARAMETERS = {
     "gain": 1.0,
-    "bias_value": 1200.0,
+    "bias_value": 11200.0,
     "ccd_xlen": 2148,
     "ccdy_len": 2064,
     "current": 0.1,
@@ -196,7 +204,10 @@ class MockCcd3:
 
     def __init__(self, data_path: Path = None, write_mock_data=True, effects=None):
 
-        self.data_path = data_path or paths.base_path / "MOCK_DATA"
+        data_path = data_path or paths.mock_data_path
+        self.data_path = Path(data_path)
+        logger.info(f"data_path: {self.data_path}")
+
         self.write_mock_data = write_mock_data
 
         self._ccd_state = 0
@@ -220,20 +231,25 @@ class MockCcd3:
         exptime = self.loaded_parameters.get("CCD3.exposure", None)
 
         if exptime is not None and self.exposure_started:
+
             total_image_time = float(exptime) + self.READ_TIME
-            dt = time.time() - self._exposure_starttime
+            dt = time.perf_counter() - self._exposure_starttime
             if dt < total_image_time:
                 if dt < exptime:
+                    logger.info("still exposing...")
                     self._ccd_state = CAMERA_EXPOSING_SHUTTER_OPEN
                 else:
+                    logger.info("still reading...")
                     self._ccd_state = CAMERA_READING
                 return
 
             else:
+                msg = f"reset CCD parameters after {dt:.1f} (>{total_image_time:.1f})"
+                logger.info(msg)
                 self.exposure_started = False
                 for key in EXPECTED_PARAMETERS:
                     _ = self.loaded_parameters.pop(key, None)
-                self._ccd_state = 0
+                self._ccd_state = CAMERA_READY
                 return
         else:
             return
@@ -249,14 +265,15 @@ class MockCcd3:
         self.loaded_parameters.update(parameters)
         return
 
-    def take_exposure(self, filepath: Path, shutter_open=True, header=None):
-        self.data_path.mkdir(exist_ok=True)
+    def take_exposure(
+        self, filepath: Path, shutter_open=True, slit_open=True, header=None
+    ):
+        self.data_path.mkdir(exist_ok=True, parents=True)
 
-        filepath = Path(filepath)
+        filepath = Path(filepath.lstrip("/"))
         if filepath.suffix not in [".fits", ".fit"]:
-            print(filepath.suffix)
-            msg = "filepath must end in '.fits' or '.fit' !"
-            logger.warning(f"filepath {filepath} should end in '.fits' or '.fit'!")
+            msg = f"filepath {filepath} must end in '.fits' or '.fit', not {filepath.suffix}!"
+            logger.warning(msg)
 
         if "CCD3.exposure" not in self.loaded_parameters:
             msg = "no parameters set!"
@@ -264,6 +281,13 @@ class MockCcd3:
 
         imgtype = self.loaded_parameters.get("CCD3.IMAGETYP", None)
         self.exposure_started = True
+        self._exposure_starttime = time.perf_counter()
+
+        output_filepath = self.data_path / filepath
+
+        logger.info(f"data_path: {self.data_path}")
+        logger.info(f"will write to {output_filepath}")
+        output_filepath.parent.mkdir(exist_ok=True, parents=True)
 
         if self.write_mock_data:
 
@@ -285,26 +309,30 @@ class MockCcd3:
 
             if shutter_open:
                 flat = gen_flat(blank)
-                sky = gen_sky_noise(
-                    blank,
-                    self.ccd_parameters["sky_counts"],
-                    self.ccd_parameters["bias_value"],
-                    self.ccd_parameters["overscan"],
-                )
+                if slit_open:
+                    sky = gen_sky_noise(
+                        blank,
+                        self.ccd_parameters["sky_counts"],
+                        self.ccd_parameters["bias_value"],
+                        self.ccd_parameters["overscan"],
+                    )
+                    science = gen_science(
+                        blank,
+                        header,
+                        self.loaded_parameters["CCD3.exposure"],
+                        overscan=self.ccd_parameters["overscan"],
+                    )
+                    photon_im = sky + science
+                else:
+                    photon_im = 0
 
-                science = gen_science(
-                    blank, header, self.loaded_parameters["CCD3.exposure"]
-                )
-                image = bias + dark + flat * (sky + science)
-
+                image = bias + dark + flat * photon_im
             else:
                 image = bias + dark
 
             hdu = image_to_hdu(image, header=header)
-
-            filepath = self.data_path / filepath
-            logger.info(f"writing image to:\n    {filepath}")
-            hdu.writeto(filepath, overwrite=True)
+            logger.info(f"writing image to:\n    {output_filepath}")
+            hdu.writeto(output_filepath, overwrite=True)
 
     def get_output_image_shape(self):
         binning = self.loaded_parameters.get("CCD3.binning", "1x1")

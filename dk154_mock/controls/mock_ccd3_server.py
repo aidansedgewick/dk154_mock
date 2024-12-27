@@ -12,6 +12,8 @@ from dk154_mock.hardware import MockCcd3
 
 logger = getLogger("MockCCD3Server")
 
+ccd3_to_ascol_shutter = {"0": "1", "1": "0"}
+
 
 class MockCcd3Server(ThreadingHTTPServer):
 
@@ -47,7 +49,7 @@ class Ccd3RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
-        logger.info(f"process GET:\n    path={self.path}")
+        logger.debug(f"process GET:\n    path={self.path}")
         parsed_input = urlparse(url=self.path, scheme="http")
         path_cmd = parsed_input.path
         if not path_cmd.startswith("/api"):
@@ -77,6 +79,25 @@ class Ccd3RequestHandler(BaseHTTPRequestHandler):
             self.server.obs.ccd3.set_exposure_parameters(parameters)
             data = {"state": self.server.obs.ccd3.get_ccd_state()}
         elif cmd == "expose":
+
+            shutter_param = self.server.obs.ccd3.ccd_parameters.get(
+                "CCD3.SHUTTER", None
+            )
+            if shutter_param is None:
+                shutter_param = "0"
+                msg = "NO 'CCD3.SHUTTER' param: defaults to '0'='open' (opposite of ASCOL!)"
+                logger.warning(msg)
+            if shutter_param not in ["0", "1"]:
+                msg = f"shutter parameter must be in ['0', '1'] ('0'='open', '1'='closed')"
+                logger.error(msg)
+                self.send_error(
+                    400, message=f"Unknown shutter param {shutter_param}", explain=msg
+                )
+                self.end_headers()
+                return
+            ascol_shutter_param = ccd3_to_ascol_shutter[shutter_param]
+            self.server.obs.telescope.set_shutter_pos(ascol_shutter_param)
+
             filepath = parameters.get("fe", None)
             if filepath is None:
                 msg = f"must provide 'fe' parameter, filepath for imgout"
@@ -102,7 +123,7 @@ class Ccd3RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        logger.info("processed data, send return")
+        logger.debug("processed data, send return")
         self.send_response(response_code)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
@@ -162,7 +183,7 @@ class Ccd3RequestHandler(BaseHTTPRequestHandler):
         return header
 
 
-def get_mock_ccd3_server(mock_dk154, port=8889) -> MockCcd3Server:
+def get_mock_ccd3_server(mock_dk154, port=8884) -> MockCcd3Server:
     return MockCcd3Server(mock_dk154, ("localhost", port), Ccd3RequestHandler)
 
 
